@@ -1,0 +1,11 @@
+medicine_name,brand_name,salt_composition,strength,dosage_form,therapeutic_class,price,stock_quantity,availability,pharmacy_name,pharmacy_address,latitude,longitude,city,district,state,phone
+Paracetamol 650,Dolo 650,Paracetamol,650 mg,Tablet,Analgesic,30.50,15,Available,Apollo Pharmacy,12 Town Hall Rd,9.9215,78.1182,Madurai,Madurai,Tamil Nadu,+91 98765 43210
+Paracetamol 650,Dolo 650,Paracetamol,650 mg,Tablet,Analgesic,28.00,50,Available,MedPlus Pharmacy,45 Bypass Road,9.9320,78.0980,Madurai,Madurai,Tamil Nadu,+91 98765 43211
+Amoxicillin 500,Amoxil,Amoxicillin,500 mg,Capsule,Antibiotic,85.00,0,Out of Stock,Apollo Pharmacy,12 Town Hall Rd,9.9215,78.1182,Madurai,Madurai,Tamil Nadu,+91 98765 43210
+Amoxicillin 500,Amoxil,Amoxicillin,500 mg,Capsule,Antibiotic,82.50,12,Available,MedPlus Pharmacy,45 Bypass Road,9.9320,78.0980,Madurai,Madurai,Tamil Nadu,+91 98765 43211
+Ibuprofen 400,Brufen 400,Ibuprofen,400 mg,Tablet,NSAID,15.00,100,Available,Apollo Pharmacy,12 Town Hall Rd,9.9215,78.1182,Madurai,Madurai,Tamil Nadu,+91 98765 43210
+Ibuprofen 400,Brufen 400,Ibuprofen,400 mg,Tablet,NSAID,12.50,0,Out of Stock,City Pharmacy,101 Kamarajar Salai,9.9190,78.1410,Madurai,Madurai,Tamil Nadu,+91 98765 43212
+Metformin 500,Glycomet 500,Metformin Hydrochloride,500 mg,Tablet,Anti-diabetic,24.50,40,Available,City Pharmacy,101 Kamarajar Salai,9.9190,78.1410,Madurai,Madurai,Tamil Nadu,+91 98765 43212
+Metformin 500,Glycomet 500,Metformin Hydrochloride,500 mg,Tablet,Anti-diabetic,26.00,20,Available,Sunrise Medicos,8 Velammal College Rd,9.9312,78.1745,Madurai,Madurai,Tamil Nadu,+91 98765 43213
+Atorvastatin 10,Lipitor 10,Atorvastatin,10 mg,Tablet,Cardiovascular,110.00,35,Available,Sunrise Medicos,8 Velammal College Rd,9.9312,78.1745,Madurai,Madurai,Tamil Nadu,+91 98765 43213
+Atorvastatin 10,Lipitor 10,Atorvastatin,10 mg,Tablet,Cardiovascular,115.00,0,Out of Stock,MedPlus Pharmacy,45 Bypass Road,9.9320,78.0980,Madurai,Madurai,Tamil Nadu,+91 98765 43211
