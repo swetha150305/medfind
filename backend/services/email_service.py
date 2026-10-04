@@ -1,5 +1,7 @@
 import os
+import json
 import smtplib
+import urllib.request
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from typing import List, Optional
@@ -41,6 +43,28 @@ def send_email(to_email: str, subject: str, html_body: str) -> bool:
     """
     smtp_host, smtp_port, smtp_user, smtp_pass, sender_email = get_smtp_credentials()
 
+    # Preferred on free hosts that block SMTP ports (e.g. Render free): Brevo's HTTPS API (port 443).
+    brevo_key = os.environ.get("BREVO_API_KEY", "").strip()
+    if brevo_key:
+        try:
+            payload = json.dumps({
+                "sender": {"name": "MedFind", "email": os.environ.get("SENDER_EMAIL", sender_email)},
+                "to": [{"email": to_email}],
+                "subject": subject,
+                "htmlContent": html_body,
+            }).encode("utf-8")
+            req = urllib.request.Request(
+                "https://api.brevo.com/v3/smtp/email",
+                data=payload,
+                headers={"api-key": brevo_key, "content-type": "application/json", "accept": "application/json"},
+                method="POST",
+            )
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                return 200 <= resp.status < 300
+        except Exception as e:
+            print(f"[EMAIL ERROR] Brevo API send failed for {to_email}: {e}")
+            return False
+
     if not smtp_user or not smtp_pass:
         print(f"\n==================================================")
         print(f"[EMAIL SERVICE LOG] Sending simulated email to: {to_email}")
@@ -58,7 +82,7 @@ def send_email(to_email: str, subject: str, html_body: str) -> bool:
         part = MIMEText(html_body, "html")
         msg.attach(part)
 
-        server = smtplib.SMTP(smtp_host, smtp_port)
+        server = smtplib.SMTP(smtp_host, smtp_port, timeout=10)
         server.starttls()
         server.login(smtp_user, smtp_pass)
         server.sendmail(sender_email, to_email, msg.as_string())
@@ -152,3 +176,26 @@ def broadcast_admin_login_alert_email(admin_emails: List[str], logging_admin_nam
     for admin_email in admin_emails:
         send_email(admin_email, subject, html_body)
 
+
+
+def send_password_reset_email(recipient_email: str, recipient_name: str, reset_link: str) -> bool:
+    """Emails a one-time password reset link (valid 30 minutes)."""
+    subject = "Reset your MedFind password"
+    safe_name = (recipient_name or "there").replace("<", "").replace(">", "")
+    html_body = f"""
+    <html>
+      <body style="font-family: system-ui, -apple-system, sans-serif; background:#f8fafc; padding:30px; margin:0;">
+        <div style="max-width:500px; margin:0 auto; background:white; border-radius:20px; padding:30px; border:1px solid #e2e8f0;">
+          <h2 style="color:#0f172a; margin-top:0;">Reset your password</h2>
+          <p style="color:#475569; font-size:14px;">Hi {safe_name}, we received a request to reset your MedFind password.
+          Click the button below to choose a new one. This link works for <b>30 minutes</b> and only once.</p>
+          <p style="text-align:center; margin:28px 0;">
+            <a href="{reset_link}" style="background:#0d9488; color:white; padding:12px 24px; border-radius:12px; text-decoration:none; font-weight:700;">Reset password</a>
+          </p>
+          <p style="color:#94a3b8; font-size:12px;">If the button does not work, copy this link into your browser:<br>{reset_link}</p>
+          <p style="color:#94a3b8; font-size:12px;">If you did not ask for this, you can ignore this email; your password will stay the same.</p>
+        </div>
+      </body>
+    </html>
+    """
+    return send_email(recipient_email, subject, html_body)

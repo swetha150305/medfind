@@ -246,6 +246,40 @@ export const api = {
     return res.json();
   },
 
+  async getAuthConfig(): Promise<{ google_client_id: string }> {
+    try {
+      const res = await fetch(`${API_BASE_URL}/config`);
+      if (!res.ok) return { google_client_id: "" };
+      return res.json();
+    } catch {
+      return { google_client_id: "" };
+    }
+  },
+
+  async forgotPassword(email: string): Promise<{ status: string; message: string }> {
+    const res = await fetch(`${API_BASE_URL}/auth/forgot-password`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email }),
+    });
+    if (!res.ok) {
+      await handleResponseError(res, "Could not send the reset email.");
+    }
+    return res.json();
+  },
+
+  async resetPassword(token: string, newPassword: string): Promise<{ status: string; message: string }> {
+    const res = await fetch(`${API_BASE_URL}/auth/reset-password`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ token, new_password: newPassword }),
+    });
+    if (!res.ok) {
+      await handleResponseError(res, "Could not reset the password.");
+    }
+    return res.json();
+  },
+
   async googleAuth(email: string, name: string, idToken?: string): Promise<{ status: string; user?: User; email?: string; message?: string }> {
     const res = await fetch(`${API_BASE_URL}/auth/google`, {
       method: "POST",

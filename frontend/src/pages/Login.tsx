@@ -1,7 +1,8 @@
-import React, { useState } from "react";
+import React, { useState, useCallback } from "react";
 import { Link, useNavigate, useLocation } from "react-router-dom";
 import { Mail, Lock, AlertCircle, ArrowRight } from "lucide-react";
 import { api } from "../services/api";
+import { GoogleSignInButton } from "../components/GoogleSignInButton";
 
 interface LoginProps {
   onLoginSuccess: (user: any) => void;
@@ -16,6 +17,44 @@ export const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
   const [isLoading, setIsLoading] = useState(false);
 
   const from = (location.state as any)?.from?.pathname || "/";
+
+  // Admin Google sign-in needs an emailed 6-digit code
+  const [mfaEmail, setMfaEmail] = useState<string | null>(null);
+  const [mfaCode, setMfaCode] = useState("");
+
+  const handleGoogleCredential = useCallback(async (credential: string) => {
+    setIsLoading(true);
+    setError(null);
+    try {
+      const res = await api.googleAuth("", "", credential);
+      if (res.status === "mfa_required" && res.email) {
+        setMfaEmail(res.email);
+      } else if (res.user) {
+        onLoginSuccess(res.user);
+        navigate(from, { replace: true });
+      }
+    } catch (err: any) {
+      setError(err.message || "Google sign-in failed.");
+    } finally {
+      setIsLoading(false);
+    }
+  }, [from, navigate, onLoginSuccess]);
+
+  const handleMfa = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!mfaEmail) return;
+    setIsLoading(true);
+    setError(null);
+    try {
+      const res = await api.verifyGoogleMFA(mfaEmail, mfaCode.trim());
+      onLoginSuccess(res.user);
+      navigate(from, { replace: true });
+    } catch (err: any) {
+      setError(err.message || "Invalid or expired code.");
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -87,6 +126,12 @@ export const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
             </div>
           </div>
 
+          <div className="text-right -mt-2">
+            <Link to="/forgot-password" className="text-xs text-teal-600 hover:text-teal-700 font-bold">
+              Forgot password?
+            </Link>
+          </div>
+
           <button
             type="submit"
             disabled={isLoading}
@@ -96,6 +141,37 @@ export const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
             <ArrowRight className="h-4 w-4" />
           </button>
         </form>
+
+        {mfaEmail ? (
+          <form onSubmit={handleMfa} className="space-y-3 border-t border-slate-100 pt-4">
+            <p className="text-xs text-slate-600">
+              Enter the 6-digit security code we emailed to <b>{mfaEmail}</b>.
+            </p>
+            <input
+              type="text"
+              inputMode="numeric"
+              maxLength={6}
+              placeholder="123456"
+              value={mfaCode}
+              onChange={(e) => setMfaCode(e.target.value)}
+              className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-slate-800 text-sm tracking-widest text-center focus:outline-none focus:ring-2 focus:ring-teal-500"
+            />
+            <button
+              type="submit"
+              disabled={isLoading || mfaCode.trim().length < 6}
+              className="w-full py-3 px-4 bg-slate-800 hover:bg-slate-900 text-white font-bold rounded-2xl text-sm transition-all"
+            >
+              Verify code
+            </button>
+          </form>
+        ) : (
+          <div className="space-y-3">
+            <div className="flex items-center gap-3 text-[10px] uppercase tracking-widest text-slate-400">
+              <div className="h-px bg-slate-200 flex-1" /> or <div className="h-px bg-slate-200 flex-1" />
+            </div>
+            <GoogleSignInButton onCredential={handleGoogleCredential} />
+          </div>
+        )}
 
         <p className="text-center text-xs text-slate-500 pt-2">
           Don't have an account?{" "}

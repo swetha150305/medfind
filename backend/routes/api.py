@@ -1,7 +1,11 @@
 import json
-from datetime import datetime
+import os
+import time
+import secrets
+import hashlib
+from datetime import datetime, timedelta
 from typing import List, Optional, Dict, Any
-from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Query, Body, Header
+from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Query, Body, Header, Request
 
 from backend.db import get_db_connection
 from backend.models import SearchQuery, LocationQuery, ColumnMapping, OCRConfirmRequest
@@ -539,102 +543,168 @@ def login_user(
     }
 
 
+@router.get("/config")
+def public_config():
+    """Public, non-secret settings the frontend needs (Google client IDs are public by design)."""
+    return {"google_client_id": os.environ.get("GOOGLE_CLIENT_ID", "")}
+
+
 @router.post("/auth/google")
 def google_auth(
-    email: str = Body(..., embed=True),
-    name: str = Body(..., embed=True),
-    id_token: Optional[str] = Body(None, embed=True),
+    id_token: str = Body(..., embed=True),
+    email: Optional[str] = Body(None, embed=True),
+    name: Optional[str] = Body(None, embed=True),
     require_mfa: bool = Body(False, embed=True)
 ):
     """
-    Enterprise Google OAuth 2.0 Authentication Callback:
-    1. Cryptographically verifies Google Token signature & claims.
-    2. Enforces Role-Based Access Control (RBAC) & Corporate Domain policies.
-    3. Initiates Multi-Factor Authentication (MFA) Step-Up Challenge for Admin Access.
+    Google sign-in. The identity comes ONLY from the verified Google token (email/name sent by the
+    browser are ignored). New accounts are normal users; admins are limited to ADMIN_EMAILS and
+    must pass an email MFA code.
     """
-    clean_email = email.strip().lower()
-    
-    # 1. Verify Google Token (if provided)
-    if id_token:
-        try:
-            from backend.services.google_auth_service import verify_google_id_token
-            payload = verify_google_id_token(id_token)
-            clean_email = payload.get("email", clean_email).lower()
-            name = payload.get("name", name)
-        except ValueError as val_err:
-            raise HTTPException(status_code=401, detail=f"Google OAuth Security Violation: {str(val_err)}")
+    from backend.services.google_auth_service import verify_google_id_token, is_admin_email, GOOGLE_CLIENT_ID
+    if not GOOGLE_CLIENT_ID:
+        raise HTTPException(status_code=503, detail="Google sign-in is not configured on this server.")
+    try:
+        payload = verify_google_id_token(id_token)
+    except ValueError as val_err:
+        raise HTTPException(status_code=401, detail=str(val_err))
+
+    clean_email = payload["email"]
+    name = (payload.get("name") or clean_email.split("@")[0]).strip()
 
     conn = get_db_connection()
     cursor = conn.cursor()
-    
-    # Check if user already exists in database
+
     cursor.execute("SELECT * FROM users WHERE email = ?", (clean_email,))
     user = cursor.fetchone()
-    
+
     if user:
-        cursor.execute("UPDATE users SET name = ?, provider = 'google' WHERE id = ?", (name, user["id"]))
-        conn.commit()
         user_role = user["role"]
         user_id = user["id"]
+        # Keep an existing password login working; just remember the display name.
+        cursor.execute("UPDATE users SET name = ? WHERE id = ?", (name, user_id))
+        conn.commit()
+        user_provider = user["provider"]
     else:
-        role = "user"
-        if any(admin_name in clean_email for admin_name in ["admin", "swetha", "faculty", "raji", "ragavi"]):
-            role = "admin"
-            
+        user_role = "admin" if is_admin_email(clean_email) else "user"
         cursor.execute(
             "INSERT INTO users (email, password_hash, name, role, provider) VALUES (?, NULL, ?, ?, 'google')",
-            (clean_email, name.strip(), role)
+            (clean_email, name, user_role)
         )
         conn.commit()
         user_id = cursor.lastrowid
-        user_role = role
+        user_provider = "google"
 
     user_payload = {
         "id": user_id,
         "email": clean_email,
         "name": name,
         "role": user_role,
-        "provider": "google"
+        "provider": user_provider
     }
 
-    # 2. MFA Step-Up Challenge Enforcement for Administrators
-    if user_role == "admin" and (require_mfa or True): # Admin panel requires MFA step-up security
+    # Administrators must pass an email MFA step.
+    if user_role == "admin":
         from backend.services.google_auth_service import create_mfa_challenge
         from backend.services.email_service import send_admin_otp_email, broadcast_admin_login_alert_email
-        
+
         mfa_code = create_mfa_challenge(clean_email, user_payload)
-        
-        # Broadcast security audit notification to all system admins
+
         cursor.execute("SELECT email FROM users WHERE role = 'admin'")
         admin_rows = cursor.fetchall()
-        admin_emails = [r["email"] for r in admin_rows] if admin_rows else ["admin@medfind.com"]
-        
-        title = f"🔐 Security Alert: Admin Google SSO Access Initiated by {name}"
-        message = f"MFA Step-Up Challenge initiated for {name} ({clean_email}). MFA Security Code: {mfa_code}."
-        
+        admin_emails = [r["email"] for r in admin_rows] if admin_rows else [clean_email]
+
         cursor.execute(
             "INSERT INTO admin_notifications (sender_email, title, message, created_at, is_read) VALUES (?, ?, ?, ?, 0)",
-            (clean_email, title, message, datetime.now().isoformat())
+            (clean_email, f"Security Alert: Admin Google sign-in by {name}",
+             f"MFA challenge started for {name} ({clean_email}).", datetime.now().isoformat())
         )
         conn.commit()
         conn.close()
-        
-        # Send MFA Security Code directly to user's email
+
         send_admin_otp_email(clean_email, name, mfa_code)
         broadcast_admin_login_alert_email(admin_emails, name, clean_email)
-        
+
         return {
             "status": "mfa_required",
             "email": clean_email,
-            "message": "Admin login detected. Multi-Factor Authentication (MFA) 6-digit challenge code sent to your email."
+            "message": "Admin sign-in detected. A 6-digit security code was sent to your email."
         }
-        
+
     conn.close()
-    
-    return {
-        "status": "success",
-        "user": user_payload
-    }
+    return {"status": "success", "user": user_payload}
+
+
+# ---------------- Forgot / reset password ----------------
+_reset_requests: Dict[str, List[float]] = {}
+
+def _public_base_url(request: Request) -> str:
+    base = os.environ.get("PUBLIC_URL") or os.environ.get("RENDER_EXTERNAL_URL")
+    if base:
+        return base.rstrip("/")
+    return str(request.base_url).rstrip("/")
+
+
+@router.post("/auth/forgot-password")
+def forgot_password(request: Request, email: str = Body(..., embed=True)):
+    """Emails a single-use reset link. Always answers the same way so emails can't be probed."""
+    generic = {"status": "ok", "message": "If an account exists for that email, a reset link has been sent."}
+    clean_email = email.strip().lower()
+
+    # Simple abuse limit: 3 requests per email per 15 minutes.
+    now = time.time()
+    recent = [t for t in _reset_requests.get(clean_email, []) if now - t < 900]
+    if len(recent) >= 3:
+        return generic
+    recent.append(now)
+    _reset_requests[clean_email] = recent
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT id, name, provider FROM users WHERE email = ?", (clean_email,))
+    user = cursor.fetchone()
+    if not user or user["provider"] != "local":
+        conn.close()
+        return generic
+
+    token = secrets.token_urlsafe(32)
+    token_hash = hashlib.sha256(token.encode("utf-8")).hexdigest()
+    expires = (datetime.now() + timedelta(minutes=30)).isoformat()
+    cursor.execute("DELETE FROM password_resets WHERE user_id = ?", (user["id"],))
+    cursor.execute(
+        "INSERT INTO password_resets (user_id, token_hash, expires_at, used) VALUES (?, ?, ?, 0)",
+        (user["id"], token_hash, expires)
+    )
+    conn.commit()
+    conn.close()
+
+    from backend.services.email_service import send_password_reset_email
+    link = f"{_public_base_url(request)}/reset-password?token={token}"
+    send_password_reset_email(clean_email, user["name"], link)
+    return generic
+
+
+@router.post("/auth/reset-password")
+def reset_password(token: str = Body(..., embed=True), new_password: str = Body(..., embed=True)):
+    """Sets a new password using a valid, unused, unexpired reset token."""
+    from backend.utils import hash_password
+    if len(new_password) < 8:
+        raise HTTPException(status_code=400, detail="Password must be at least 8 characters.")
+
+    token_hash = hashlib.sha256(token.encode("utf-8")).hexdigest()
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM password_resets WHERE token_hash = ? AND used = 0", (token_hash,))
+    row = cursor.fetchone()
+    if not row or datetime.fromisoformat(row["expires_at"]) < datetime.now():
+        conn.close()
+        raise HTTPException(status_code=400, detail="This reset link is invalid or has expired. Please request a new one.")
+
+    cursor.execute("UPDATE users SET password_hash = ? WHERE id = ?", (hash_password(new_password), row["user_id"]))
+    cursor.execute("DELETE FROM password_resets WHERE user_id = ?", (row["user_id"],))
+    conn.commit()
+    conn.close()
+    return {"status": "success", "message": "Password updated. You can now log in."}
 
 
 @router.post("/auth/google/mfa-verify")

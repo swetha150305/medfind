@@ -11,47 +11,42 @@ ALLOWED_ADMIN_DOMAINS = os.environ.get("ALLOWED_ADMIN_DOMAINS", "velammal.edu.in
 # Store active MFA Step-Up Challenge tokens temporarily in memory
 mfa_challenges: Dict[str, Dict[str, Any]] = {}
 
+def is_admin_email(email: str) -> bool:
+    """Only emails listed in the ADMIN_EMAILS environment variable may become admins via Google."""
+    allowed = [e.strip().lower() for e in os.environ.get("ADMIN_EMAILS", "").split(",") if e.strip()]
+    return email.strip().lower() in allowed
+
+
 def verify_google_id_token(id_token: str) -> Dict[str, Any]:
     """
-    Cryptographically verifies the Google ID Token against Google's OAuth 2.0 public API endpoints.
-    Verifies Audience (aud), Expiration (exp), and Email Verification (email_verified).
+    Verifies a Google ID token with Google's tokeninfo endpoint.
+    Checks audience (must equal our GOOGLE_CLIENT_ID), issuer and email verification.
+    Any failure raises ValueError. There is NO offline fallback: an unverified token never logs anyone in.
     """
     if not id_token:
         raise ValueError("Google ID Token is missing.")
+    if not GOOGLE_CLIENT_ID:
+        raise ValueError("Google sign-in is not configured on this server.")
 
     try:
-        # Query Google Token Info Endpoint
         url = f"https://oauth2.googleapis.com/tokeninfo?id_token={urllib.parse.quote(id_token)}"
-        req = urllib.request.Request(url, headers={"User-Agent": "MedFind-Security-Server/1.0"})
+        req = urllib.request.Request(url, headers={"User-Agent": "MedFind-Server/1.0"})
         with urllib.request.urlopen(req, timeout=10) as response:
             payload = json.loads(response.read().decode("utf-8"))
+    except Exception:
+        raise ValueError("Google could not verify this sign-in. Please try again.")
 
-        # 1. Audience Check (if GOOGLE_CLIENT_ID is configured)
-        if GOOGLE_CLIENT_ID and payload.get("aud") != GOOGLE_CLIENT_ID:
-            raise ValueError(f"Audience mismatch: Token audience '{payload.get('aud')}' does not match client ID.")
+    if payload.get("aud") != GOOGLE_CLIENT_ID:
+        raise ValueError("This Google sign-in was issued for a different application.")
+    if payload.get("iss") not in ("accounts.google.com", "https://accounts.google.com"):
+        raise ValueError("Invalid token issuer.")
+    if payload.get("email_verified") not in [True, "true", "True", 1]:
+        raise ValueError("Your Google email is not verified.")
+    if not payload.get("email"):
+        raise ValueError("Google did not return an email address.")
 
-        # 2. Email Verification Check
-        if payload.get("email_verified") not in [True, "true", "True", 1]:
-            raise ValueError("Google account email is not verified by Google.")
-
-        # 3. Domain (hd) Claim Check for Corporate Workspace Enforcements
-        email = payload.get("email", "").lower().strip()
-        domain = email.split("@")[-1] if "@" in email else ""
-        payload["domain"] = domain
-
-        return payload
-
-    except urllib.error.HTTPError as e:
-        # Fallback for local simulation testing if offline token passed
-        print(f"[GOOGLE AUTH WARN] Live Token Verification fallback: {e}")
-        return {
-            "email": id_token.lower() if "@" in id_token else "admin@medfind.com",
-            "name": "Authenticated Admin User",
-            "email_verified": True,
-            "hd": id_token.split("@")[-1] if "@" in id_token else "medfind.com"
-        }
-    except Exception as e:
-        raise ValueError(f"Invalid Google ID token: {str(e)}")
+    payload["email"] = payload["email"].lower().strip()
+    return payload
 
 
 def create_mfa_challenge(email: str, user_data: Dict[str, Any]) -> str:

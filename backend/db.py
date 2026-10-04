@@ -97,6 +97,16 @@ def init_db():
     """)
 
     cursor.execute("""
+    CREATE TABLE IF NOT EXISTS password_resets (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER NOT NULL,
+        token_hash TEXT NOT NULL,
+        expires_at TEXT NOT NULL,
+        used INTEGER DEFAULT 0
+    )
+    """)
+
+    cursor.execute("""
     CREATE TABLE IF NOT EXISTS admin_otps (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         email TEXT NOT NULL,

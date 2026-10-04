@@ -11,6 +11,8 @@ import { DatasetUpload } from "./pages/DatasetUpload";
 import { SystemAnalytics } from "./pages/SystemAnalytics";
 import { Login } from "./pages/Login";
 import { Signup } from "./pages/Signup";
+import { ForgotPassword } from "./pages/ForgotPassword";
+import { ResetPassword } from "./pages/ResetPassword";
 
 // ProtectedRoute Guard Component
 interface ProtectedRouteProps {
@@ -82,6 +84,8 @@ const App: React.FC = () => {
             {/* Authentication Routes */}
             <Route path="/login" element={<Login onLoginSuccess={handleLoginSuccess} />} />
             <Route path="/signup" element={<Signup onLoginSuccess={handleLoginSuccess} />} />
+            <Route path="/forgot-password" element={<ForgotPassword />} />
+            <Route path="/reset-password" element={<ResetPassword />} />
 
             {/* Authenticated User Routes */}
             <Route
