@@ -746,6 +746,10 @@ def request_admin_otp(
     from backend.services.email_service import send_admin_otp_email, broadcast_admin_alert_email
     
     clean_email = email.strip().lower()
+
+    from backend.services.google_auth_service import is_admin_email
+    if not is_admin_email(clean_email):
+        raise HTTPException(status_code=403, detail="This email is not authorised to become an administrator.")
     
     conn = get_db_connection()
     cursor = conn.cursor()
@@ -774,7 +778,7 @@ def request_admin_otp(
     
     # Broadcast notification in database
     title = f"🚨 Admin Authorization Request: {name}"
-    message = f"Security Alert: {name} ({clean_email}) requested Administrator privileges. Security Verification OTP: {otp_code} (Valid for 10 mins)."
+    message = f"Security Alert: {name} ({clean_email}) requested Administrator privileges. A verification code was emailed to them (valid for 10 mins)."
     
     cursor.execute(
         "INSERT INTO admin_notifications (sender_email, title, message, created_at, is_read) VALUES (?, ?, ?, ?, 0)",
@@ -809,6 +813,10 @@ def verify_admin_otp(
     """
     clean_email = email.strip().lower()
     clean_otp = otp_code.strip()
+
+    from backend.services.google_auth_service import is_admin_email
+    if not is_admin_email(clean_email):
+        raise HTTPException(status_code=403, detail="This email is not authorised to become an administrator.")
     
     conn = get_db_connection()
     cursor = conn.cursor()

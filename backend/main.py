@@ -28,6 +28,38 @@ app.include_router(router)
 def on_startup():
     init_db()
     print("Database initialized on startup.")
+    ensure_bootstrap_admin()
+
+
+def ensure_bootstrap_admin():
+    """
+    Creates the first administrator from environment settings so it survives restarts:
+      ADMIN_EMAILS    -> first email in the list becomes the admin account
+      ADMIN_PASSWORD  -> its starting password (change it later with Forgot password)
+    An existing account is never given a new password; it is only promoted to admin.
+    """
+    emails = [e.strip().lower() for e in os.environ.get("ADMIN_EMAILS", "").split(",") if e.strip()]
+    password = os.environ.get("ADMIN_PASSWORD", "")
+    if not emails or not password:
+        return
+    from backend.db import get_db_connection
+    from backend.utils import hash_password
+    email = emails[0]
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute("SELECT id, role FROM users WHERE email = ?", (email,))
+    row = cur.fetchone()
+    if row is None:
+        cur.execute(
+            "INSERT INTO users (email, password_hash, name, role, provider) VALUES (?, ?, ?, 'admin', 'local')",
+            (email, hash_password(password), "Administrator"),
+        )
+        print(f"Bootstrap admin created: {email}")
+    elif row["role"] != "admin":
+        cur.execute("UPDATE users SET role = 'admin' WHERE id = ?", (row["id"],))
+        print(f"Existing account promoted to admin: {email}")
+    conn.commit()
+    conn.close()
 
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
