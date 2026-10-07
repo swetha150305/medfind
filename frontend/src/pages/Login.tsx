@@ -1,6 +1,6 @@
 import React, { useState, useCallback } from "react";
 import { Link, useNavigate, useLocation } from "react-router-dom";
-import { Mail, Lock, AlertCircle, ArrowRight } from "lucide-react";
+import { Mail, Lock, AlertCircle, ArrowRight, User, ShieldCheck } from "lucide-react";
 import { api } from "../services/api";
 import { GoogleSignInButton } from "../components/GoogleSignInButton";
 
@@ -15,6 +15,16 @@ export const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [mode, setMode] = useState<"user" | "admin">("user");
+  const isAdminMode = mode === "admin";
+
+  const switchMode = (m: "user" | "admin") => {
+    setMode(m);
+    setError(null);
+    setPassword("");
+    setMfaEmail(null);
+    setMfaCode("");
+  };
 
   const from = (location.state as any)?.from?.pathname || "/";
 
@@ -28,6 +38,7 @@ export const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
     try {
       const res = await api.googleAuth("", "", credential);
       if (res.status === "mfa_required" && res.email) {
+        setMode("admin"); // Google sign-in for an administrator account
         setMfaEmail(res.email);
       } else if (res.user) {
         onLoginSuccess(res.user);
@@ -68,6 +79,14 @@ export const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
 
     try {
       const res = await api.login(email, password);
+      if (isAdminMode && res.user.role !== "admin") {
+        setError("This account is not an administrator. Use the User tab to log in.");
+        return;
+      }
+      if (!isAdminMode && res.user.role === "admin") {
+        setError("This is an administrator account. Please use the Admin tab to log in.");
+        return;
+      }
       onLoginSuccess(res.user);
       navigate(from, { replace: true });
     } catch (err: any) {
@@ -80,12 +99,37 @@ export const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
   return (
     <div className="min-h-[80vh] flex items-center justify-center px-4 py-12 bg-slate-50">
       <div className="w-full max-w-md bg-white rounded-3xl border border-slate-200 shadow-xl p-8 space-y-6">
+        <div className="grid grid-cols-2 gap-1 p-1 bg-slate-100 rounded-2xl">
+          <button
+            type="button"
+            onClick={() => switchMode("user")}
+            className={`flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-bold transition-all ${
+              !isAdminMode ? "bg-white text-teal-700 shadow" : "text-slate-500 hover:text-slate-700"
+            }`}
+          >
+            <User className="h-4 w-4" /> User
+          </button>
+          <button
+            type="button"
+            onClick={() => switchMode("admin")}
+            className={`flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-bold transition-all ${
+              isAdminMode ? "bg-white text-indigo-700 shadow" : "text-slate-500 hover:text-slate-700"
+            }`}
+          >
+            <ShieldCheck className="h-4 w-4" /> Admin
+          </button>
+        </div>
+
         <div className="text-center space-y-2">
-          <div className="inline-flex items-center justify-center h-12 w-12 rounded-2xl bg-teal-50 text-teal-600 mb-1">
-            <Lock className="h-6 w-6" />
+          <div className={`inline-flex items-center justify-center h-12 w-12 rounded-2xl mb-1 ${isAdminMode ? "bg-indigo-50 text-indigo-600" : "bg-teal-50 text-teal-600"}`}>
+            {isAdminMode ? <ShieldCheck className="h-6 w-6" /> : <Lock className="h-6 w-6" />}
           </div>
-          <h2 className="text-2xl font-black text-slate-800 tracking-tight">Login</h2>
-          <p className="text-slate-500 text-xs">Enter your email and password to access MedFind.</p>
+          <h2 className="text-2xl font-black text-slate-800 tracking-tight">{isAdminMode ? "Admin Login" : "User Login"}</h2>
+          <p className="text-slate-500 text-xs">
+            {isAdminMode
+              ? "For administrators who manage the medicine and pharmacy data."
+              : "Enter your email and password to access MedFind."}
+          </p>
         </div>
 
         {error && (
@@ -173,12 +217,18 @@ export const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
           </div>
         )}
 
-        <p className="text-center text-xs text-slate-500 pt-2">
-          Don't have an account?{" "}
-          <Link to="/signup" className="text-teal-600 hover:text-teal-700 font-bold underline">
-            Sign Up
-          </Link>
-        </p>
+        {isAdminMode ? (
+          <p className="text-center text-xs text-slate-500 pt-2">
+            Admin accounts are created by the system owner, so there is no sign up here.
+          </p>
+        ) : (
+          <p className="text-center text-xs text-slate-500 pt-2">
+            Don't have an account?{" "}
+            <Link to="/signup" className="text-teal-600 hover:text-teal-700 font-bold underline">
+              Sign Up
+            </Link>
+          </p>
+        )}
       </div>
     </div>
   );
